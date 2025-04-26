@@ -1,1 +1,3 @@
-tmpls is a lightweight tool for working with go html templates.
+# templs
+
+A lightweight tool for working with go html templates.
