@@ -31,7 +31,7 @@ type Templates struct {
 func New(config Config, logger *slog.Logger) (*Templates, error) {
 	if config.TemplatesDir != "" {
 		logger.Warn(
-			"TemplatesDir is set, templs won't use embedded templates",
+			"TemplatesDir is set, tmpls won't use embedded templates",
 			"templatesDir", config.TemplatesDir,
 		)
 	}
