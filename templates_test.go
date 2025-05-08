@@ -58,20 +58,20 @@ func TestNew(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := tmpls.New(
 				tmpls.Config{
-					TemplatesDir: tt.templatesDir,
-					TemplatesFS:  tt.templatesFS,
-					CommonGlob:   tt.commonGlob,
+					TemplatesDir: test.templatesDir,
+					TemplatesFS:  test.templatesFS,
+					CommonGlob:   test.commonGlob,
 				},
 				slog.Default(),
 			)
 
-			if tt.expectError != (err != nil) {
-				t.Fatalf("expectError=%v, got %v", tt.expectError, err)
+			if test.expectError != (err != nil) {
+				t.Fatalf("expectError=%v, got %v", test.expectError, err)
 			}
 		})
 
@@ -147,15 +147,15 @@ func testExecute(t *testing.T, tmpls *tmpls.Templates) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			output, err := tmpls.Execute(tt.glob, tt.template, tt.data)
+			output, err := tmpls.Execute(test.glob, test.template, test.data)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if output != tt.expected {
-				t.Fatalf("expected %s but got %s", tt.expected, output)
+			if output != test.expected {
+				t.Fatalf("expected %s but got %s", test.expected, output)
 			}
 		})
 	}
