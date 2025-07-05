@@ -1,60 +1,62 @@
 package tmpls_test
 
 import (
-	"crypto/rand"
-	"embed"
-	"encoding/base64"
-	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/fivethirty/tmpls"
 )
 
-//go:embed testtemplates
-var templatesFS embed.FS
+var testFS = fstest.MapFS{
+	"test.html.tmpl": &fstest.MapFile{
+		Data: []byte(
+			`{{ template "common.html.tmpl" . }}{{ define "content" }}{{ .Text }}{{ end }}`,
+		),
+	},
+	"other.html.tmpl": &fstest.MapFile{
+		Data: []byte(
+			`{{ template "common.html.tmpl" . }}{{ define "content" }}{{ .Text }}!!!{{ end }}`,
+		),
+	},
+	"common/common.html.tmpl": &fstest.MapFile{
+		Data: []byte(`hello {{ template "content" . }}`),
+	},
+}
 
 func TestNew(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name         string
-		templatesDir string
 		templatesFS  fs.FS
+		disableCache bool
 		commonGlob   string
 		expectError  bool
 	}{
 		{
-			name:         "should create new templates with dir",
-			templatesDir: "/foo",
-			commonGlob:   "*.html",
-			expectError:  false,
-		},
-		{
-			name:         "should create new templates with dir without CommonGlob",
-			templatesDir: "/foo",
-			expectError:  false,
-		},
-		{
-			name:         "should create new templates with dir and fs set",
-			templatesDir: "/foo",
-			templatesFS:  templatesFS,
-			expectError:  false,
-		},
-		{
-			name:        "should create new templates with fs",
-			templatesFS: templatesFS,
-			commonGlob:  "*.html",
+			name:        "should create new templates",
+			templatesFS: testFS,
+			commonGlob:  "*.html.tmpl",
 			expectError: false,
 		},
 		{
-			name:        "should create new templates with fs without CommonGlob",
-			templatesFS: templatesFS,
+			name:        "should create new templates without CommonGlob",
+			templatesFS: testFS,
 			expectError: false,
+		},
+		{
+			name:         "should create new templates with cache disabled",
+			templatesFS:  testFS,
+			disableCache: true,
+			commonGlob:   "*.html.tmpl",
+			expectError:  false,
+		},
+		{
+			name:        "should fail with nil FS",
+			templatesFS: nil,
+			expectError: true,
 		},
 	}
 
@@ -63,8 +65,8 @@ func TestNew(t *testing.T) {
 			t.Parallel()
 			_, err := tmpls.New(
 				tmpls.Config{
-					TemplatesDir: test.templatesDir,
 					TemplatesFS:  test.templatesFS,
+					DisableCache: test.disableCache,
 					CommonGlob:   test.commonGlob,
 				},
 				slog.Default(),
@@ -82,17 +84,12 @@ type templateData struct {
 	Text string
 }
 
-func TestEmbeddedExecute(t *testing.T) {
+func TestCachedExecute(t *testing.T) {
 	t.Parallel()
-
-	subFS, err := fs.Sub(templatesFS, "testtemplates")
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	tmpls, err := tmpls.New(
 		tmpls.Config{
-			TemplatesFS: subFS,
+			TemplatesFS: testFS,
 			CommonGlob:  "common/*.html.tmpl",
 		},
 		slog.Default(),
@@ -104,13 +101,13 @@ func TestEmbeddedExecute(t *testing.T) {
 	testExecute(t, tmpls)
 }
 
-func TestFSExecute(t *testing.T) {
+func TestNonCachedExecute(t *testing.T) {
 	t.Parallel()
-	dir := copyEmbeddedFS(t)
 
 	tmpls, err := tmpls.New(
 		tmpls.Config{
-			TemplatesDir: dir,
+			TemplatesFS:  testFS,
+			DisableCache: true,
 			CommonGlob:   "common/*.html.tmpl",
 		},
 		slog.Default(),
@@ -161,75 +158,24 @@ func testExecute(t *testing.T, tmpls *tmpls.Templates) {
 	}
 }
 
-func randomString(length int) (string, error) {
-	b := make([]byte, length)
-	_, err := rand.Read(b)
-	if err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-func copyEmbeddedFS(t *testing.T) string {
-	t.Helper()
-	rand, err := randomString(16)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dir := fmt.Sprintf("/tmp/%s/", rand)
-	t.Cleanup(func() {
-		os.RemoveAll(dir)
-	})
-	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
-		t.Fatal(err)
-	}
-
-	err = fs.WalkDir(templatesFS, "testtemplates", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			t.Fatal(err)
-		}
-		targetPath := filepath.Join(dir, path)
-		if d.IsDir() {
-			err := os.Mkdir(targetPath, os.ModePerm)
-			if err != nil {
-				return err
-			}
-		} else {
-			sourceFile, err := templatesFS.Open(path)
-			if err != nil {
-				return err
-			}
-			defer sourceFile.Close()
-
-			targetFile, err := os.Create(targetPath)
-			if err != nil {
-				return err
-			}
-			defer targetFile.Close()
-
-			_, err = io.Copy(targetFile, sourceFile)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return fmt.Sprintf("%s/testtemplates/", dir)
-}
-
 func TestHotSwap(t *testing.T) {
 	t.Parallel()
-	dir := copyEmbeddedFS(t)
+
+	mutableFS := fstest.MapFS{
+		"test.html.tmpl": &fstest.MapFile{
+			Data: []byte(
+				`{{ template "common.html.tmpl" . }}{{ define "content" }}{{ .Text }}{{ end }}`,
+			),
+		},
+		"common/common.html.tmpl": &fstest.MapFile{
+			Data: []byte(`hello {{ template "content" . }}`),
+		},
+	}
 
 	tmpls, err := tmpls.New(
 		tmpls.Config{
-			TemplatesDir: dir,
+			TemplatesFS:  mutableFS,
+			DisableCache: true,
 			CommonGlob:   "common/*.html.tmpl",
 		},
 		slog.Default(),
@@ -251,18 +197,10 @@ func TestHotSwap(t *testing.T) {
 		t.Fatalf("expected hello world but got %s", output)
 	}
 
-	newContent := `{{ template "common.html.tmpl" . }}{{ define "content" }}{{ .Text }}?{{ end }}`
-	path := filepath.Join(dir, "test.html.tmpl")
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	err = os.WriteFile(
-		path,
-		[]byte(newContent),
-		os.ModePerm,
-	)
-	if err != nil {
-		t.Fatal(err)
+	mutableFS["test.html.tmpl"] = &fstest.MapFile{
+		Data: []byte(
+			`{{ template "common.html.tmpl" . }}{{ define "content" }}{{ .Text }}?{{ end }}`,
+		),
 	}
 
 	output, err = tmpls.Execute(
@@ -275,18 +213,17 @@ func TestHotSwap(t *testing.T) {
 	}
 
 	if output != "hello world?" {
-		t.Fatalf("expected world but got %s", output)
+		t.Fatalf("expected hello world? but got %s", output)
 	}
 }
 
 func TestHTMLEscaping(t *testing.T) {
 	t.Parallel()
-	dir := copyEmbeddedFS(t)
 
 	tmpls, err := tmpls.New(
 		tmpls.Config{
-			TemplatesDir: dir,
-			CommonGlob:   "common/*.html.tmpl",
+			TemplatesFS: testFS,
+			CommonGlob:  "common/*.html.tmpl",
 		},
 		slog.Default(),
 	)
