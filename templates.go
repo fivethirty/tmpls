@@ -15,7 +15,6 @@ type Config struct {
 	CommonGlob   string
 }
 
-
 type Templates struct {
 	config    Config
 	executors sync.Map
@@ -65,27 +64,27 @@ func (t *Templates) execute(
 	data any,
 ) error {
 	if t.config.DisableCache {
-		e, err := t.newExecutor(glob)
+		tmpl, err := t.newExecutor(glob)
 		if err != nil {
 			return err
 		}
-		return e.ExecuteTemplate(buffer, templateName, data)
-	} else {
-		value, _ := t.executors.Load(glob)
-		var tmpl *template.Template
-		if value == nil {
-			var err error
-			tmpl, err = t.newExecutor(glob)
-			if err != nil {
-				return err
-			}
-			t.executors.Store(glob, tmpl)
-		} else {
-			tmpl = value.(*template.Template)
-		}
-
 		return tmpl.ExecuteTemplate(buffer, templateName, data)
 	}
+
+	value, _ := t.executors.Load(glob)
+	var tmpl *template.Template
+	if value == nil {
+		var err error
+		tmpl, err = t.newExecutor(glob)
+		if err != nil {
+			return err
+		}
+		t.executors.Store(glob, tmpl)
+	} else {
+		tmpl = value.(*template.Template)
+	}
+
+	return tmpl.ExecuteTemplate(buffer, templateName, data)
 }
 
 func (t *Templates) newExecutor(patterns ...string) (*template.Template, error) {
