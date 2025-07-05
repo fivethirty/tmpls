@@ -4,21 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
-	"io"
 	"io/fs"
 	"log/slog"
-	"os"
 	"sync"
 )
 
 type Config struct {
-	TemplatesDir string
 	TemplatesFS  fs.FS
+	DisableCache bool
 	CommonGlob   string
-}
-
-type executor interface {
-	ExecuteTemplate(io.Writer, string, any) error
 }
 
 type Templates struct {
@@ -29,11 +23,11 @@ type Templates struct {
 }
 
 func New(config Config, logger *slog.Logger) (*Templates, error) {
-	if config.TemplatesDir != "" {
-		logger.Warn(
-			"TemplatesDir is set, tmpls won't use embedded templates",
-			"templatesDir", config.TemplatesDir,
-		)
+	if config.TemplatesFS == nil {
+		return nil, fmt.Errorf("TemplatesFS is required")
+	}
+	if config.DisableCache {
+		logger.Warn("Template caching disabled - templates will be parsed on each request")
 	}
 	return &Templates{
 		config:    config,
@@ -66,64 +60,35 @@ func (t *Templates) Execute(
 func (t *Templates) execute(
 	buffer *bytes.Buffer,
 	glob string,
-	template string,
+	templateName string,
 	data any,
 ) error {
-	value, _ := t.executors.Load(glob)
-	if value == nil {
-		e, err := t.newExecutor(glob)
+	if t.config.DisableCache {
+		tmpl, err := t.newExecutor(glob)
 		if err != nil {
 			return err
 		}
-		value = e
-		t.executors.Store(glob, value)
+		return tmpl.ExecuteTemplate(buffer, templateName, data)
 	}
 
-	executor, ok := value.(executor)
-	if !ok {
-		return fmt.Errorf("invalid executor type: %T", value)
+	value, _ := t.executors.Load(glob)
+	var tmpl *template.Template
+	if value == nil {
+		var err error
+		tmpl, err = t.newExecutor(glob)
+		if err != nil {
+			return err
+		}
+		t.executors.Store(glob, tmpl)
+	} else {
+		tmpl = value.(*template.Template)
 	}
 
-	return executor.ExecuteTemplate(buffer, template, data)
+	return tmpl.ExecuteTemplate(buffer, templateName, data)
 }
 
-func (t *Templates) newExecutor(patterns ...string) (executor, error) {
+func (t *Templates) newExecutor(patterns ...string) (*template.Template, error) {
 	// common goes first so it can be overridden
 	allPatterns := append([]string{t.config.CommonGlob}, patterns...)
-	if t.config.TemplatesDir != "" {
-		return t.newFSExecutor(allPatterns...)
-	} else {
-		return t.newEmbeddedExecutor(allPatterns...)
-	}
-}
-
-func (t *Templates) newFSExecutor(patterns ...string) (executor, error) {
-	return &fsExecutor{
-		templatesDir: t.config.TemplatesDir,
-		patterns:     patterns,
-	}, nil
-}
-
-func (fe *fsExecutor) ExecuteTemplate(wr io.Writer, name string, data any) error {
-	t, err := template.ParseFS(
-		os.DirFS(fe.templatesDir),
-		fe.patterns...,
-	)
-	if err != nil {
-		return err
-	}
-	return t.ExecuteTemplate(wr, name, data)
-}
-
-func (t *Templates) newEmbeddedExecutor(patterns ...string) (executor, error) {
-	executor, err := template.ParseFS(t.config.TemplatesFS, patterns...)
-	if err != nil {
-		return nil, err
-	}
-	return executor, nil
-}
-
-type fsExecutor struct {
-	templatesDir string
-	patterns     []string
+	return template.ParseFS(t.config.TemplatesFS, allPatterns...)
 }
