@@ -1,6 +1,6 @@
 # tmpls
 
-A thread-safe and lightweight tool for working with go html templates.
+A lightweight, thread-safe tool for working with go html templates.
 
 ## Usage
 
