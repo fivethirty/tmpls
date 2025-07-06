@@ -76,7 +76,6 @@ func TestNew(t *testing.T) {
 				t.Fatalf("expectError=%v, got %v", test.expectError, err)
 			}
 		})
-
 	}
 }
 
