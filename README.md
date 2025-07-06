@@ -1,5 +1,7 @@
 # tmpls
 
+![test status](https://github.com/fivethirty/tmpls/actions/workflows/test.yml/badge.svg)
+
 A lightweight, thread-safe tool for working with go html templates.
 
 ## Usage
